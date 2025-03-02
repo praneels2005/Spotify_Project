@@ -1,4 +1,7 @@
 #Client credential flow
+#- can't access user data
+#- Cannot refresh access token(Only lasts for an hour)
+#The Client Credentials Flow is specifically designed for non-user-specific access, where the application itself authenticates and retrieves an access token to access resources
 from dotenv import load_dotenv
 import os
 import base64
@@ -15,7 +18,6 @@ client_secret = os.getenv("CLIENT_SECRET")
 #1st step
 #This is what is used IN future headers to send requests to the API to get information from spotify
 #Access token gives app developer authorization to acccess information from spotify
-#The Client Credentials Flow is specifically designed for non-user-specific access, where the application itself authenticates and retrieves an access token to access resources
 def get_token():
     
     auth_string = client_id + ":" + client_secret
@@ -92,7 +94,7 @@ def get_user_id(token):
 
 token = get_token()
 
-result = search_for_artist(token, "Rich Amiri")
+result = search_for_artist(token, "Michael Jackson")
 #print(result["name"])
 artist_id = result["id"]
 songs = get_songs_by_artist(token, artist_id)
