@@ -48,7 +48,7 @@ app.config.update(
     SESSION_COOKIE_NAME='spotify_session',
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SECURE=False,
-    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SAMESITE='None',
     SESSION_COOKIE_DOMAIN=None,
     SESSION_COOKIE_PATH='/',
 )
@@ -57,7 +57,7 @@ Session(app)
 
 CORS(app, 
      resources={r"/*": {
-         "origins": ["http://localhost:8080"],  # Specific origin, not wildcard
+         "origins": ["http://127.0.0.1:8080", "http://127.0.0.1:8081", "http://localhost:8080", "http://localhost:8081"],  # Support multiple ports and localhost variants
          "methods": ["GET", "POST", "OPTIONS"],
          "allow_headers": ["Content-Type", "Authorization", "Accept"],
          "supports_credentials": True,
@@ -66,10 +66,35 @@ CORS(app,
      }},
      supports_credentials=True)
 
+# CRITICAL: Ensure session cookie is set on all responses
+@app.after_request
+def after_request(response):
+    """Ensure session cookie is properly set in all responses"""
+    # Check all Set-Cookie headers (case-insensitive)
+    set_cookie_headers = []
+    for header_name, header_value in response.headers:
+        if header_name.lower() == 'set-cookie':
+            set_cookie_headers.append(header_value)
+    
+    if set_cookie_headers:
+        for cookie_header in set_cookie_headers:
+            print(f"🍪 Set-Cookie header: {cookie_header[:100]}...")
+    else:
+        # If session was modified but no cookie is set, log it
+        if session and session.modified:
+            print(f"⚠️ Session modified but NO Set-Cookie header found!")
+            print(f"   Session keys: {list(session.keys())}")
+            print(f"   Session cookie name: {app.config.get('SESSION_COOKIE_NAME', 'session')}")
+    
+    return response
+
 # CRITICAL FIX #4: Make session permanent on every request
 @app.before_request
 def make_session_permanent():
     session.permanent = True
+    # Ensure session is marked as modified if it has data
+    if session:
+        session.modified = True
 
 # Ensure CORS headers are set on all responses
 # @app.after_request
@@ -102,19 +127,75 @@ def index():
 
 @app.route('/login')
 def login():
+    # Validate required environment variables
+    if not client_id or not client_secret or not redirect_uri:
+        return jsonify({"error": "Missing required OAuth configuration. Check CLIENT_ID, CLIENT_SECRET, and REDIRECT_URI in .env"}), 500
+    
+    # CRITICAL: Validate redirect_uri format
+    # The redirect_uri must exactly match what's registered in Spotify Dashboard
+    if not redirect_uri.startswith(('http://', 'https://')):
+        return jsonify({"error": "REDIRECT_URI must be a valid URL starting with http:// or https://"}), 500
+    
+    # IMPORTANT: Spotify no longer allows 'localhost' - must use 127.0.0.1 or [::1]
+    # See: https://developer.spotify.com/documentation/web-api/concepts/redirect_uri
+    if 'localhost' in redirect_uri.lower():
+        return jsonify({
+            "error": "REDIRECT_URI cannot use 'localhost'. Use '127.0.0.1' or '[::1]' instead. See: https://developer.spotify.com/documentation/web-api/concepts/redirect_uri"
+        }), 500
+        
+    # After line 119, add:
+    if redirect_uri.startswith('http://'):
+        is_loopback = '127.0.0.1' in redirect_uri or '[::1]' in redirect_uri
+        if not is_loopback:
+            return jsonify({
+                "error": "Non-loopback redirect URIs must use HTTPS. Use 'https://' or switch to loopback address (127.0.0.1 or [::1])"
+            }), 500
+    
     state = secrets.token_urlsafe(16)
     session['oauth_state'] = state
-    session['frontend_redirect'] = request.args.get('redirect', 'http://localhost:8080/preferences')
+    session['frontend_redirect'] = request.args.get('redirect', 'http://127.0.0.1:8080/preferences')
     
+    # CRITICAL: Force session to be saved before redirecting to Spotify
     session.modified = True
+    session.permanent = True
     
+    # WORKAROUND: Also store state in a temporary file as backup
+    # This helps if session cookie is not sent (browser blocking)
+    # Remove this in production if session cookies work properly
+    try:
+        import json
+        state_backup_file = './flask_session/oauth_state_backup.json'
+        os.makedirs('./flask_session', exist_ok=True)
+        with open(state_backup_file, 'w') as f:
+            json.dump({
+                'state': state,
+                'frontend_redirect': session.get('frontend_redirect'),
+                'timestamp': datetime.now().timestamp()
+            }, f)
+        print(f"✅ State backed up to file")
+    except Exception as e:
+        print(f"⚠️ Could not backup state to file: {e}")
+    
+    # Debug: Verify session is saved
+    print(f"🔍 === Login Route Debug ===")
+    print(f"✅ State generated: {state[:20]}...")
+    print(f"✅ Frontend redirect: {session.get('frontend_redirect')}")
+    print(f"✅ Session ID before redirect: {request.cookies.get('spotify_session', 'NOT SET YET')}")
+    print(f"✅ Session cookie (session): {request.cookies.get('session', 'NOT SET YET')}")
+    print(f"✅ Session keys: {list(session.keys())}")
+    print(f"✅ Session modified: {session.modified}")
+    
+    # CRITICAL: This redirect_uri MUST exactly match:
+    # 1. What's registered in Spotify Developer Dashboard
+    # 2. The redirect_uri used in /callback when exchanging code for token (line 158)
+    # Any mismatch (case, trailing slash, etc.) will cause OAuth to fail
     params = {
         "client_id":client_id,
         "response_type":"code",
         "scope":"user-read-email playlist-modify-public playlist-modify-private",
         "redirect_uri": redirect_uri,
         "state": state,
-        'show_dialog': True
+        'show_dialog': "true"
     }
     
     auth_url = f"{AUTH_URL}?{urllib.parse.urlencode(params)}"
@@ -122,15 +203,68 @@ def login():
 
 @app.route('/callback')
 def callback():
+    # Debug: Check session state immediately
+    print(f"🔍 === Callback Route Debug ===")
+    print(f"🔍 All cookies received: {dict(request.cookies)}")
+    print(f"🔍 Session cookie (spotify_session): {request.cookies.get('spotify_session', 'NOT FOUND')}")
+    print(f"🔍 Session cookie (session): {request.cookies.get('session', 'NOT FOUND')}")
+    print(f"🔍 Session keys available: {list(session.keys())}")
+    print(f"🔍 Full session dict: {dict(session)}")
+    
     state = request.args.get('state')
     stored_state = session.get('oauth_state')
+    stored_frontend_redirect = session.get('frontend_redirect')
     
-    print(f"Received state: {state}")
-    print(f"Stored state: {stored_state}")
+    print(f"🔍 Received state from Spotify: {state}")
+    print(f"🔍 Stored state in session: {stored_state}")
+    
+    # WORKAROUND: If session state is missing, try to load from backup file
+    if not stored_state:
+        print("⚠️ oauth_state not found in session, trying backup file...")
+        try:
+            import json
+            state_backup_file = './flask_session/oauth_state_backup.json'
+            if os.path.exists(state_backup_file):
+                with open(state_backup_file, 'r') as f:
+                    backup_data = json.load(f)
+                    # Check if backup is recent (within 10 minutes)
+                    backup_age = datetime.now().timestamp() - backup_data.get('timestamp', 0)
+                    if backup_age < 600:  # 10 minutes
+                        stored_state = backup_data.get('state')
+                        if not stored_frontend_redirect:
+                            stored_frontend_redirect = backup_data.get('frontend_redirect')
+                        # Restore to session
+                        session['oauth_state'] = stored_state
+                        session['frontend_redirect'] = stored_frontend_redirect
+                        session.modified = True
+                        print(f"✅ Restored state from backup file: {stored_state[:20]}...")
+                        # Clean up backup file
+                        os.remove(state_backup_file)
+                    else:
+                        print(f"⚠️ Backup file too old ({backup_age:.0f} seconds), ignoring")
+                        os.remove(state_backup_file)
+        except Exception as e:
+            print(f"⚠️ Could not load backup state: {e}")
+    
+    if not stored_state:
+        print("❌ CRITICAL: oauth_state not found in session or backup!")
+        print("❌ This means the session cookie was not sent or session was lost")
+        print("❌ Possible causes:")
+        print("   1. Session cookie not being sent by browser")
+        print("   2. Session cookie blocked by browser (SAMESITE/SECURE mismatch)")
+        print("   3. Session expired or cleared")
+        return jsonify({
+            "error": "Session expired. Please try logging in again.",
+            "details": "The OAuth state was not found in session. This usually means the session cookie was not sent or was blocked."
+        }), 400
     
     if state != stored_state:
         print("❌ State mismatch!")
+        print(f"   Expected: {stored_state}")
+        print(f"   Received: {state}")
         return jsonify({"error": "Invalid state parameter"}), 400
+    
+    print("✅ State validation passed!")
     
     if 'error' in request.args:
         print(f"❌ OAuth error: {request.args.get('error')}")
@@ -149,6 +283,9 @@ def callback():
             "Content-Type": "application/x-www-form-urlencoded"
     }
         
+    # CRITICAL: redirect_uri here MUST exactly match the redirect_uri used in /login (line 119)
+    # This is used for validation only - Spotify verifies it matches the initial authorization request
+    # Any difference (case, trailing slash, etc.) will cause token exchange to fail with INVALID_CLIENT
     data = {
             'code': code,
             'redirect_uri': redirect_uri,
@@ -180,25 +317,51 @@ def callback():
     else:
         print(f"⚠️ Failed to fetch user profile: {profile_response.text}")
     
+    # CRITICAL: Ensure session is saved before redirecting
     session.modified = True
-    print("Session set successfully")
-    print(f"Session ID after storing: {request.cookies.get('session')}")
+    session.permanent = True
+    
+    print("✅ Session set successfully")
+    print(f"✅ Session ID after storing: {request.cookies.get('spotify_session', 'NOT FOUND')}")
     access_preview = session.get('access_token', '')[:20]
-    print(f"Access token (first 20): {access_preview}...")
-    print(f"Session contents: {list(session.keys())}")
-    frontend_redirect = session.pop('frontend_redirect', 'http://localhost:8080/preferences')
-    return redirect(frontend_redirect)
+    print(f"✅ Access token (first 20): {access_preview}...")
+    print(f"✅ Session contents: {list(session.keys())}")
+    print(f"✅ Session has access_token: {'access_token' in session}")
+    
+    # Get frontend redirect (use stored value from session or backup)
+    frontend_redirect = session.pop('frontend_redirect', None) or stored_frontend_redirect or 'http://127.0.0.1:8080/preferences'
+    print(f"✅ Redirecting to frontend: {frontend_redirect}")
+    
+    # CRITICAL: Force session to be saved before redirect
+    # Flask-Session saves automatically, but we ensure it's marked as modified
+    session.modified = True
+    session.permanent = True
+    
+    # Create redirect response
+    response = redirect(frontend_redirect)
+    
+    # Flask-Session will automatically set the cookie in the response
+    # The after_request handler will log if the cookie is set
+    
+    return response
 
 @app.route('/auth/status')
 def auth_status():
     """Check if user is authenticated"""
     print("=== Auth Status Check ===")
-    print(f"Session ID: {request.cookies.get('session')}")
-    print(f"Session contents: {dict(session)}")
-    print(f"Has access_token: {'access_token' in session}")
+    print(f"🔍 All cookies received: {dict(request.cookies)}")
+    print(f"🔍 Session cookie (spotify_session): {request.cookies.get('spotify_session', 'NOT FOUND')}")
+    print(f"🔍 Session cookie (session): {request.cookies.get('session', 'NOT FOUND')}")
+    print(f"🔍 Session keys: {list(session.keys())}")
+    print(f"🔍 Session contents: {dict(session)}")
+    print(f"🔍 Has access_token: {'access_token' in session}")
     
     if 'access_token' not in session:
         print("❌ No access token in session")
+        print("❌ Possible causes:")
+        print("   1. User hasn't completed OAuth flow")
+        print("   2. Session cookie not being sent by browser")
+        print("   3. Session expired or cleared")
         return jsonify({"authenticated": False}), 401
     
     # Check if token is expired
