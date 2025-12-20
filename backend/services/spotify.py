@@ -70,6 +70,7 @@ class SpotifyService:
         }
         
         try:
+            # 1. Try strict search first
             response = requests.get(
                 f"{self.BASE_URL}/search", 
                 headers=self.get_auth_headers(access_token),
@@ -83,9 +84,28 @@ class SpotifyService:
                 if items:
                     return items[0]
             elif response.status_code == 429:
-                # Simple backoff handled by caller or improving this logic later
                 print("Rate limited by Spotify")
-                
+                return None
+
+            # 2. Fallback: Relaxed search (just string matching)
+            # Sometimes AI gives "Title - Remastered" or slightly off artist names
+            relaxed_query = f"{song_name} {artist_name}"
+            params["q"] = relaxed_query
+            
+            response = requests.get(
+                f"{self.BASE_URL}/search", 
+                headers=self.get_auth_headers(access_token),
+                params=params,
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get("tracks", {}).get("items", [])
+                if items:
+                    print(f"Fallback search successful for: {song_name}")
+                    return items[0]
+            
             return None
         except Exception as e:
             print(f"Error searching for {song_name} by {artist_name}: {e}")
@@ -132,3 +152,35 @@ class SpotifyService:
         if response.status_code != 200:
             raise Exception(f"Failed to fetch profile: {response.text}")
         return response.json()
+
+    def upload_playlist_cover(self, access_token, playlist_id, image_b64):
+        """
+        Uploads a custom cover image to a playlist.
+        image_b64: Base64 encoded JPEG image data (max 256KB)
+        """
+        url = f"{self.BASE_URL}/playlists/{playlist_id}/images"
+        
+        # NOTE: the API wants the raw Base64 string in the body
+        # Strip header if present (e.g. data:image/jpeg;base64,...)
+        if "," in image_b64:
+            image_b64 = image_b64.split(",")[1]
+            
+        # Per user request:
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "image/jpeg",
+            "Accept": "application/json"
+        }
+        
+        response = requests.put(
+            url,
+            headers=headers,
+            data=image_b64
+        )
+        
+        if response.status_code == 202:
+             print(" Cover image uploaded!")
+             return True
+        else:
+             print(f" Upload failed: {response.status_code} - {response.text}")
+             return False

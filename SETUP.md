@@ -68,7 +68,7 @@ DATABASE_URL=sqlite:///spotify_app.db
 #### 3.1 Navigate to Frontend Directory
 
 ```bash
-cd UI_Front/jam-genie
+cd UI_Front
 ```
 
 #### 3.2 Install Node.js Dependencies
@@ -97,7 +97,7 @@ cd /Users/praneelpothukanuri/Desktop/Spotify_Project
 source venv/bin/activate
 
 # Run Flask server
-python3 main2.py
+python3 run.py
 ```
 
 The backend will run on `http://localhost:5000`
@@ -138,16 +138,16 @@ touch .env
 # Edit .env with your credentials
 
 # 3. Set up frontend
-cd UI_Front/jam-genie
+cd UI_Front
 npm install
 cd ../..
 
 # 4. Run backend (in one terminal)
 source venv/bin/activate
-python3 main2.py
+python3 run.py
 
 # 5. Run frontend (in another terminal)
-cd UI_Front/jam-genie
+cd UI_Front
 npm run dev
 ```
 

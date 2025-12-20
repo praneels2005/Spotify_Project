@@ -13,7 +13,8 @@ import {
   responseType,
   showDialog,
 } from "@/config/spotify";
-import { authService } from "@/lib/api";
+import { authService, playlistService } from "@/lib/api";
+import type { Track } from "@/lib/api";
 import { usePreferences } from "@/context/PreferencesContext";
 
 type AppStep = "landing" | "auth" | "preferences" | "preview" | "success";
@@ -32,7 +33,7 @@ interface GeneratedPlaylist {
   name: string;
   NumSongs: number[];
   totalDuration: string;
-  Tracks: string[];
+  Tracks: Track[];
   genres: string[];
   playlist_id?: string;
 }
@@ -46,9 +47,9 @@ const SpotifyPlaylistGenerator = () => {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [generatedPlaylist, setGeneratedPlaylist] = useState<GeneratedPlaylist | null>(null);
 
-useEffect(()=>{
-  checkAuthentication();
-},[]);
+  useEffect(() => {
+    checkAuthentication();
+  }, []);
 
   // ---- Load state from localStorage on first render ----
   useEffect(() => {
@@ -103,17 +104,17 @@ useEffect(()=>{
   // ---- NEW: Check authentication status ----
   const checkAuthentication = async () => {
     setIsCheckingAuth(true);
-    
+
     try {
       const authed = await authService.checkAuthStatus();
       setIsAuthenticated(authed);
-      
+
       // If authenticated and on landing page, go to preferences
       if (authed && currentStep === "landing") {
         setCurrentStep("preferences");
       }
 
-     // If not authenticated and not on landing page, go to landing
+      // If not authenticated and not on landing page, go to landing
       if (!authed && currentStep !== "landing") {
         setCurrentStep("landing");
       }
@@ -145,7 +146,7 @@ useEffect(()=>{
     // )}&show_dialog=${showDialog}`;
     // location.assign(authUrl);
 
-authService.initiateLogin()
+    authService.initiateLogin()
     // After redirect back from Spotify, you'd parse the hash and continue.
     // setTimeout(() => {
     //   setCurrentStep("preferences");
@@ -169,9 +170,20 @@ authService.initiateLogin()
     }
   };
 
-  const handleSavePlaylist = (name: string, tracks: []) => {
+  const handleSavePlaylist = async (name: string, description: string, tracks: Track[]) => {
     console.log("Saving playlist:", name, tracks);
-    setCurrentStep("success");
+    try {
+      const uris = tracks.map(t => t.uri);
+      const response = await playlistService.createPlaylist(name, description, uris);
+
+      // Update generated playlist with the new ID
+      setGeneratedPlaylist(prev => prev ? ({ ...prev, playlist_id: response.playlist_id }) : null);
+
+      setCurrentStep("success");
+    } catch (error) {
+      console.error("Failed to save playlist:", error);
+      // Handle error (show toast?)
+    }
   };
 
   const handleRegeneratePlaylist = () => {
@@ -225,16 +237,16 @@ authService.initiateLogin()
     return names[Math.floor(Math.random() * names.length)];
   };
 
-   // NEW: Helper to calculate duration
+  // NEW: Helper to calculate duration
   const calculateDuration = (trackCount: number): string => {
     const totalMinutes = trackCount * 3; // Estimate 3 minutes per track
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
-    return hours > 0 
-      ? `${hours}:${minutes.toString().padStart(2, '0')}:00` 
+    return hours > 0
+      ? `${hours}:${minutes.toString().padStart(2, '0')}:00`
       : `${minutes}:00`;
   };
-   // ---- Show loading while checking auth ----
+  // ---- Show loading while checking auth ----
   if (isCheckingAuth) {
     return (
       <div className="min-h-screen bg-gradient-dark flex items-center justify-center">
@@ -259,7 +271,7 @@ authService.initiateLogin()
       return <PreferenceInput onGenerate={handleGeneratePlaylist} />;
 
     case "preview":
-      if(!isAuthenticated){
+      if (!isAuthenticated) {
         return <LandingPage onStartAuth={handleStartAuth} />;
       }
       return generatedPlaylist ? (
@@ -278,13 +290,13 @@ authService.initiateLogin()
       const playlistUrl = generatedPlaylist?.playlist_id
         ? `https://open.spotify.com/playlist/${generatedPlaylist.playlist_id}`
         : "#";
-      
-      
+
+
       // Use actual track count from Tracks array, not requested length
       const actualTrackCount =
-      generatedPlaylist?.Tracks?.length ||
-      generatedPlaylist?.NumSongs?.[0] ||
-      25;      
+        generatedPlaylist?.Tracks?.length ||
+        generatedPlaylist?.NumSongs?.[0] ||
+        25;
       return (
         <SuccessPage
           playlistName={generatedPlaylist?.name || "Your Playlist"}

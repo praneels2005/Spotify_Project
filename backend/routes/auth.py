@@ -32,7 +32,7 @@ def login():
     session.modified = True
 
     # Construct Auth URL
-    scope = "user-read-email playlist-modify-public playlist-modify-private"
+    scope = "user-read-email playlist-modify-public playlist-modify-private ugc-image-upload"
     params = {
         "client_id": Config.SPOTIFY_CLIENT_ID,
         "response_type": "code",

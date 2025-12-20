@@ -1,147 +1,131 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Play, Pause, RotateCcw, Edit3, Clock, Music, Save, Shuffle, X, Plus, Search } from "lucide-react";
+import { Play, Pause, RotateCcw, Edit3, Clock, Music, Save, Shuffle, X, Plus, Search, Camera } from "lucide-react";
 
-interface Track {
-  id: string;
-  title: string;
-  artist: string;
-  album: string;
-  duration: string;
-  image: string;
-  preview?: string;
-}
+import { playlistService } from "@/lib/api";
+import type { Track } from "@/lib/api";
+
+// Re-using Track from api.ts
 
 interface PlaylistData {
   name: string;
-    NumSongs: number[];
-    totalDuration: string;
-    Tracks: string[];
-    genres: string[];
+  NumSongs: number[];
+  totalDuration: string;
+  Tracks: Track[]; // Updated to Track[]
+  genres: string[];
+  description?: string; // Add description
 }
 
-const PlaylistPreview = ({ 
-  playlist, 
-  onSave, 
-  onRegenerate 
-}: { 
+const PlaylistPreview = ({
+  playlist,
+  onSave,
+  onRegenerate
+}: {
   playlist: PlaylistData;
-  onSave: (name: string, tracks: Track[]) => void;
+  onSave: (name: string, description: string, tracks: Track[], image?: string) => void;
   onRegenerate: () => void;
 }) => {
   const [playlistName, setPlaylistName] = useState(playlist.name);
-  const [tracks, setTracks] = useState(playlist.Tracks);
+  const [tracks, setTracks] = useState<Track[]>(playlist.Tracks); // Use Track type
   const [isEditing, setIsEditing] = useState(false);
   const [playingTrack, setPlayingTrack] = useState<string | null>(null);
   const [showAddSongs, setShowAddSongs] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Track[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null); // Store base64 for API
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mock track data for demo
-  const mockTracks: Track[] = [
-    {
-      id: "1",
-      title: "Blinding Lights",
-      artist: "The Weeknd",
-      album: "After Hours",
-      duration: "3:20",
-      image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
-    },
-    {
-      id: "2", 
-      title: "Good 4 U",
-      artist: "Olivia Rodrigo",
-      album: "SOUR",
-      duration: "2:58",
-      image: "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=100&h=100&fit=crop"
-    },
-    {
-      id: "3",
-      title: "Levitating",
-      artist: "Dua Lipa",
-      album: "Future Nostalgia",
-      duration: "3:23",
-      image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
-    },
-    {
-      id: "4",
-      title: "Stay",
-      artist: "The Kid LAROI, Justin Bieber",
-      album: "F*CK LOVE 3",
-      duration: "2:21",
-      image: "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=100&h=100&fit=crop"
-    },
-    {
-      id: "5",
-      title: "Industry Baby",
-      artist: "Lil Nas X ft. Jack Harlow",
-      album: "MONTERO",
-      duration: "3:32",
-      image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Optional validation
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file");
+      return;
     }
-  ];
 
-  const displayTracks = tracks.length > 0 ? tracks : mockTracks;
+    // Create a local preview URL
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedImage(previewUrl);
 
-  // Additional mock tracks for search/add functionality
-  const availableTracks: Track[] = [
-    {
-      id: "6",
-      title: "Heat Waves",
-      artist: "Glass Animals",
-      album: "Dreamland",
-      duration: "3:58",
-      image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
-    },
-    {
-      id: "7",
-      title: "Watermelon Sugar",
-      artist: "Harry Styles", 
-      album: "Fine Line",
-      duration: "2:54",
-      image: "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=100&h=100&fit=crop"
-    },
-    {
-      id: "8",
-      title: "drivers license",
-      artist: "Olivia Rodrigo",
-      album: "SOUR", 
-      duration: "4:02",
-      image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
-    },
-    {
-      id: "9",
-      title: "Peaches",
-      artist: "Justin Bieber ft. Daniel Caesar",
-      album: "Justice",
-      duration: "3:18",
-      image: "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=100&h=100&fit=crop"
-    },
-    {
-      id: "10",
-      title: "Anti-Hero",
-      artist: "Taylor Swift",
-      album: "Midnights",
-      duration: "3:20",
-      image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
-    }
-  ];
+    // Convert to Base64 for Backend
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      setImageBase64(base64String);
+    };
+    reader.readAsDataURL(file);
+  };
 
-  const filteredAvailableTracks = availableTracks.filter(track => 
-    !displayTracks.some(existingTrack => existingTrack.id === track.id) &&
-    (track.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-     track.artist.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const searchSpotify = async (query: string) => {
+    if (!query) return;
+    const results = await playlistService.searchTracks(query);
+    setSearchResults(results);
+  };
+
+  // // Mock track data for demo
+  // const mockTracks: Track[] = [
+  //   {
+  //     id: "1",
+  //     title: "Blinding Lights",
+  //     artist: "The Weeknd",
+  //     album: "After Hours",
+  //     duration: "3:20",
+  //     image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
+  //   },
+  //   {
+  //     id: "2",
+  //     title: "Good 4 U",
+  //     artist: "Olivia Rodrigo",
+  //     album: "SOUR",
+  //     duration: "2:58",
+  //     image: "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=100&h=100&fit=crop"
+  //   },
+  //   {
+  //     id: "3",
+  //     title: "Levitating",
+  //     artist: "Dua Lipa",
+  //     album: "Future Nostalgia",
+  //     duration: "3:23",
+  //     image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
+  //   },
+  //   {
+  //     id: "4",
+  //     title: "Stay",
+  //     artist: "The Kid LAROI, Justin Bieber",
+  //     album: "F*CK LOVE 3",
+  //     duration: "2:21",
+  //     image: "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=100&h=100&fit=crop"
+  //   },
+  //   {
+  //     id: "5",
+  //     title: "Industry Baby",
+  //     artist: "Lil Nas X ft. Jack Harlow",
+  //     album: "MONTERO",
+  //     duration: "3:32",
+  //     image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop"
+  //   }
+  // ];
+
+  const displayTracks = tracks;
+  // removed mock tracks logic
 
   const togglePlay = (trackId: string) => {
     setPlayingTrack(playingTrack === trackId ? null : trackId);
   };
 
   const handleSave = () => {
-    onSave(playlistName, displayTracks);
+    onSave(playlistName, playlist.description || "", displayTracks, imageBase64 || undefined);
   };
 
   const moveTrack = (fromIndex: number, toIndex: number) => {
@@ -168,7 +152,7 @@ const PlaylistPreview = ({
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-4">
-            Your Generated 
+            Your Generated
             <span className="bg-gradient-music bg-clip-text text-transparent"> Playlist</span>
           </h1>
           <p className="text-muted-foreground text-lg">
@@ -181,8 +165,34 @@ const PlaylistPreview = ({
           <div className="lg:col-span-1">
             <Card className="bg-card border-border sticky top-6">
               <CardHeader>
-                <div className="aspect-square bg-gradient-music rounded-lg mb-4 flex items-center justify-center">
-                  <Music className="w-16 h-16 text-background" />
+                <div
+                  className="group relative aspect-square bg-gradient-music rounded-lg mb-4 flex items-center justify-center overflow-hidden cursor-pointer"
+                  onClick={openFilePicker}
+                >
+                  {selectedImage ? (
+                    <img
+                      src={selectedImage}
+                      alt="Playlist Cover"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Music className="w-16 h-16 text-background" />
+                  )}
+
+                  {/* Hover Overlay */}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white pointer-events-none">
+                    <Camera className="w-8 h-8 mb-2" />
+                    <span className="text-xs font-medium">Change Cover</span>
+                  </div>
+
+                  {/* Hidden File Input */}
+                  <Input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg"
+                    className="hidden"
+                    onChange={handleImageUpload}
+                  />
                 </div>
                 <div className="space-y-4">
                   <div>
@@ -241,9 +251,9 @@ const PlaylistPreview = ({
                 <CardTitle className="flex items-center justify-between">
                   <span>Track List</span>
                   <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => setShowAddSongs(!showAddSongs)}
                     >
                       <Plus className="w-4 h-4 mr-2" />
@@ -266,14 +276,25 @@ const PlaylistPreview = ({
                         <Input
                           placeholder="Search for songs to add..."
                           value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
+                          onChange={(e) => {
+                            setSearchQuery(e.target.value);
+                            // Debounce search? Or just search on enter/effect?
+                            // For now, let's trigger searchEffect
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              // Trigger search
+                              searchSpotify(searchQuery);
+                            }
+                          }}
                           className="flex-1"
                         />
                       </div>
-                      
-                      {searchQuery && (
+
+                      {/* Search Results */}
+                      {searchResults.length > 0 && (
                         <div className="space-y-1 max-h-48 overflow-y-auto">
-                          {filteredAvailableTracks.map((track) => (
+                          {searchResults.map((track) => (
                             <div
                               key={track.id}
                               className="flex items-center gap-3 p-2 hover:bg-muted/50 rounded transition-colors"
@@ -299,11 +320,11 @@ const PlaylistPreview = ({
                               </Button>
                             </div>
                           ))}
-                          {filteredAvailableTracks.length === 0 && (
-                            <div className="text-center py-4 text-muted-foreground text-sm">
-                              No songs found matching "{searchQuery}"
-                            </div>
-                          )}
+
+                          <div className="text-center py-4 text-muted-foreground text-sm">
+                            No songs found matching "{searchQuery}"
+                          </div>
+
                         </div>
                       )}
                     </div>
@@ -319,7 +340,7 @@ const PlaylistPreview = ({
                       <div className="text-muted-foreground text-sm w-6 text-center">
                         {index + 1}
                       </div>
-                      
+
                       <Button
                         variant="ghost"
                         size="sm"
