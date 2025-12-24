@@ -1,6 +1,6 @@
 # Spotify Playlist Generator
 
-Spotify Playlist Generator (also referred to as **Jam Genie**) is a full-stack tool that turns natural-language prompts and listening preferences into curated Spotify playlists. The Flask backend handles Spotify OAuth, talks to Google Gemini to propose tracks, and assembles playlists in the user’s Spotify account, while the Vite + React frontend guides users through authentication, preference capture, preview, and confirmation.
+PlaylistAI is a full-stack tool that turns natural-language prompts and listening preferences into curated Spotify playlists. The Flask backend handles Spotify OAuth, talks to Google Gemini to propose tracks, and assembles playlists in the user’s Spotify account, while the Typescript + React frontend guides users through authentication, preference capture, preview, and confirmation.
 
 ## Features
 - **AI-assisted track selection** using Google Gemini to translate moods, artists, and activity prompts into candidate songs.
